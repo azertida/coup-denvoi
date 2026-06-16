@@ -202,11 +202,12 @@ function countdown(d){
 
 function inRange(d, m){
   const now = Date.now();
+  const todayKey = dayKey(new Date());
   if(rangeFilter === "all")   return true;
-  if(rangeFilter === "today") return dayKey(d) === dayKey(new Date());
-  if(rangeFilter === "week")  return d.getTime() > now - 36e5 && d.getTime() <= now + 7*864e5;
-  // "upcoming" : à venir + résultats des dernières 36 h
-  return d.getTime() > now - 36*36e5;
+  if(rangeFilter === "today") return dayKey(d) === todayKey;
+  if(rangeFilter === "week")  return dayKey(d) >= todayKey && d.getTime() <= now + 7*864e5;
+  // "upcoming" : à partir d'aujourd'hui (rien d'hier)
+  return dayKey(d) >= todayKey;
 }
 
 /* ---- agenda ---- */
