@@ -456,7 +456,7 @@ def main():
         if m["id"] in seen:
             continue
         seen.add(m["id"]); uniq.append(m)
-    uniq.sort(key=lambda m: (m.get("start") or (m.get("date", "9999") + "T99")))
+    uniq.sort(key=lambda m: (m.get("start") or ((m.get("date") or "9999") + "T99")))
 
     out = {
         "generated": iso_z(datetime.now(timezone.utc)),
