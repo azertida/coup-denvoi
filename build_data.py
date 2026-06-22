@@ -3,17 +3,9 @@
 """
 Coup d'envoi — collecteur de données.
 
-Agrège plusieurs sources d'horaires sportifs en UN seul fichier matches.json,
-normalisé, servi ensuite par la PWA (même origine -> zéro CORS).
-
 Sources :
-  - Football  : openfootball (domaine public, JSON brut GitHub, sans clé)
-                -> Coupe du monde + Euro
-  - Rugby     : Top 14 via scraping top14.lnr.fr (site officiel LNR)
-                Tournoi des VI Nations via API Wikipedia (wikicode parsé)
-
-Tout est exécuté dans une GitHub Action : aucune clé sensible, dépendances
-minimales (beautifulsoup4 + lxml pour le scraping LNR).
+  - Football  : openfootball (Coupe du monde + Euro)
+  - Rugby     : Top 14 (LNR), VI Nations (Wikipedia), Championnat des nations (Wikipedia)
 """
 
 import json, re, sys, time, urllib.request, urllib.error
@@ -22,7 +14,6 @@ from datetime import datetime, timezone, timedelta
 TIMEOUT = 30
 UA = {"User-Agent": "coup-denvoi/1.0 (+github action; ana@connectes.be)"}
 
-# ---------------------------------------------------------------- HTTP
 def get_json(url):
     req = urllib.request.Request(url, headers=UA)
     with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
@@ -33,18 +24,16 @@ def get_text(url):
     with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
         return r.read().decode("utf-8")
 
-# ---------------------------------------------------------------- helpers temps
 def iso_z(dt):
     return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 def parse_openfootball_time(date, t):
-    """ '13:00 UTC-6' -> ('2026-06-11T19:00:00Z', tbd=False). Sans heure -> (None, True)."""
     if not t:
         return None, True
     m = re.match(r"\s*(\d{1,2}):(\d{2})\s*UTC([+-]\d{1,2})", t)
     y, mo, d = (int(x) for x in date.split("-"))
     if not m:
-        m2 = re.match(r"\s*(\d{1,2}):(\d{2})", t)  # heure sans fuseau -> traitée comme UTC
+        m2 = re.match(r"\s*(\d{1,2}):(\d{2})", t)
         if not m2:
             return None, True
         hh, mm = int(m2.group(1)), int(m2.group(2))
@@ -65,17 +54,11 @@ MOIS_FR = {
 }
 
 def combine_date_time_paris(date_iso, time_str):
-    """
-    Convertit une date ISO (2026-06-27) + horaire local Paris ("21:05")
-    en datetime UTC ISO. Si l'heure est absente, renvoie None.
-    """
     if not date_iso or not time_str:
         return None
     try:
         y, mo, d = (int(x) for x in date_iso.split("-"))
         hh, mm = (int(x) for x in time_str.split(":"))
-        # Paris/Bruxelles : CET (UTC+1) hiver, CEST (UTC+2) été.
-        # Approximation : DST de fin mars à fin octobre.
         is_dst = 3 < mo < 10 or (mo == 3 and d >= 28) or (mo == 10 and d < 28)
         offset_hours = 2 if is_dst else 1
         local = datetime(y, mo, d, hh, mm, tzinfo=timezone(timedelta(hours=offset_hours)))
@@ -83,7 +66,6 @@ def combine_date_time_paris(date_iso, time_str):
     except Exception:
         return None
 
-# ---------------------------------------------------------------- football (openfootball)
 OPENFOOTBALL = [
     ("Coupe du monde 2026", "https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.json"),
     ("Euro 2028",           "https://raw.githubusercontent.com/openfootball/euro.json/master/2028/euro.json"),
@@ -115,11 +97,10 @@ def collect_openfootball(name, url):
         })
     return out
 
-# ---------------------------------------------------------------- rugby Top 14 (LNR)
+# Top 14 (LNR)
 LNR_BASE = "https://top14.lnr.fr/calendrier-et-resultats"
 
 def parse_french_date(date_fr, season_start_year):
-    """Convertit 'samedi 30 mai' en date ISO en s'appuyant sur l'année de début de saison."""
     if not date_fr:
         return None
     parts = date_fr.lower().strip().split()
@@ -127,44 +108,35 @@ def parse_french_date(date_fr, season_start_year):
         return None
     try:
         day = int(parts[-2])
-        month_name = parts[-1]
-        month = MOIS_FR.get(month_name)
+        month = MOIS_FR.get(parts[-1])
         if not month:
             return None
-        # Saison X-Y : août-déc en X, jan-juil en Y
         year = season_start_year if month >= 8 else season_start_year + 1
         return f"{year:04d}-{month:02d}-{day:02d}"
     except (ValueError, IndexError):
         return None
 
 def _lnr_parse_page(html, phase_label, season_start_year):
-    """Parse une page LNR et renvoie une liste de matchs normalisés."""
     from bs4 import BeautifulSoup
     soup = BeautifulSoup(html, "lxml")
     container = soup.select_one(".page-builder-fixtures")
     if not container:
         return []
-    
     matches = []
     current_date_iso = None
-    
     for elem in container.find_all("div"):
         classes = elem.get("class") or []
-        
         if "calendar-results__fixture-date" in classes:
             current_date_iso = parse_french_date(elem.get_text(strip=True), season_start_year)
             continue
-        
         if "match-line" in classes and "match-line__wrapper" not in classes:
             clubs = elem.select(".club-line__name")
             if len(clubs) != 2:
                 continue
             home = clubs[0].get_text(strip=True)
             away = clubs[1].get_text(strip=True)
-            
             score_elem = elem.select_one(".match-line__score")
             raw = score_elem.get_text(strip=True) if score_elem else ""
-            
             score = None
             time_str = None
             m = re.match(r"^(\d+)\s*-\s*(\d+)$", raw)
@@ -174,27 +146,16 @@ def _lnr_parse_page(html, phase_label, season_start_year):
                 m = re.match(r"^(\d{1,2})h(\d{2})$", raw)
                 if m:
                     time_str = f"{int(m.group(1)):02d}:{m.group(2)}"
-            
             matches.append({
-                "phase": phase_label,
-                "date": current_date_iso,
-                "time_local": time_str,
-                "home": home,
-                "away": away,
-                "score": score,
+                "phase": phase_label, "date": current_date_iso, "time_local": time_str,
+                "home": home, "away": away, "score": score,
             })
     return matches
 
 def collect_top14(season="2025-2026"):
-    """Scrape toutes les phases du Top 14 (26 journées + barrage + demi-finale + finale)."""
     season_start = int(season.split("-")[0])
     phases = [(f"J{n}", f"j{n}") for n in range(1, 27)]
-    phases += [
-        ("Barrage", "barrage"),
-        ("Demi-finale", "demi-finale"),
-        ("Finale", "finale"),
-    ]
-    
+    phases += [("Barrage", "barrage"), ("Demi-finale", "demi-finale"), ("Finale", "finale")]
     out = []
     for phase_label, slug_phase in phases:
         url = f"{LNR_BASE}/{season}/{slug_phase}"
@@ -203,37 +164,22 @@ def collect_top14(season="2025-2026"):
         except Exception as e:
             print(f"  [!!] LNR {phase_label} : {e}", file=sys.stderr)
             continue
-        
         for m in _lnr_parse_page(html, phase_label, season_start):
             start_utc = combine_date_time_paris(m["date"], m["time_local"]) if m["time_local"] else None
             out.append({
                 "id": slug("top-14", m["date"], m["home"], m["away"]),
-                "sport": "Rugby",
-                "competition": "Top 14",
-                "date": m["date"],
-                "start": start_utc,
+                "sport": "Rugby", "competition": "Top 14",
+                "date": m["date"], "start": start_utc,
                 "tbd": start_utc is None and m["score"] is None,
-                "home": m["home"],
-                "away": m["away"],
-                "score": m["score"],
+                "home": m["home"], "away": m["away"], "score": m["score"],
                 "status": "finished" if m["score"] else "scheduled",
-                "group": m["phase"],
-                "venue": None,
+                "group": m["phase"], "venue": None,
             })
         time.sleep(0.5)
-    
     return out
 
-# ---------------------------------------------------------------- rugby Six Nations (Wikipedia)
+# Wikipedia rugby helpers
 WIKI_API = "https://fr.wikipedia.org/w/api.php"
-
-JOURNEES_6N = [
-    ("Première journée", "J1"),
-    ("Deuxième journée", "J2"),
-    ("Troisième journée", "J3"),
-    ("Quatrième journée", "J4"),
-    ("Cinquième journée", "J5"),
-]
 
 def _wiki_parse_date(text):
     if not text:
@@ -288,18 +234,33 @@ def _wiki_parse_score(text):
 def _wiki_parse_lieu(text):
     if not text:
         return None
+    # Cas {{Lien|langue=en|Nom du stade}}
+    m = re.search(r"\{\{Lien\|[^}]*\|([^}|]+)\}\}", text)
+    if m:
+        stadium = m.group(1).strip()
+        rest = text[m.end():]
+        m2 = re.search(r"\[\[([^\]|]+?)(?:\|[^\]]*)?\]\]", rest)
+        if m2:
+            city = re.sub(r"\s*\([^)]+\)$", "", m2.group(1).strip())
+            return f"{stadium}, {city}"
+        return stadium
+    # Cas standard [[Stade]], [[Ville]]
     m = re.search(r"\[\[([^\]|]+?)(?:\|[^\]]*)?\]\]", text)
     if m:
-        return m.group(1).strip()
+        stadium = m.group(1).strip()
+        rest = text[m.end():]
+        m2 = re.search(r"\[\[([^\]|]+?)(?:\|[^\]]*)?\]\]", rest)
+        if m2:
+            city = re.sub(r"\s*\([^)]+\)$", "", m2.group(1).strip())
+            return f"{stadium}, {city}"
+        return stadium
     return text.strip() or None
 
 def _wiki_parse_match_template(body):
-    """Parse les champs d'un modèle {{Match rugby | ... }}."""
     if body.startswith("{{"):
         body = body[2:]
     if body.endswith("}}"):
         body = body[:-2]
-    
     parts, current = [], []
     depth_braces = depth_brackets = 0
     i = 0
@@ -318,13 +279,11 @@ def _wiki_parse_match_template(body):
         current.append(c); i += 1
     if current:
         parts.append("".join(current))
-    
     fields = {}
     for part in parts[1:]:
         if "=" in part:
             k, _, v = part.partition("=")
             fields[k.strip().lower()] = v.strip()
-    
     return {
         "date": _wiki_parse_date(fields.get("date", "")),
         "time_local": _wiki_parse_heure(fields.get("heure", "")),
@@ -335,7 +294,6 @@ def _wiki_parse_match_template(body):
     }
 
 def _wiki_extract_templates(wikitext):
-    """Trouve tous les blocs {{Match rugby ...}} en gérant les imbrications."""
     out = []
     i = 0
     while i < len(wikitext):
@@ -355,21 +313,28 @@ def _wiki_extract_templates(wikitext):
         i = j
     return out
 
-def _wiki_find_section(wikitext, title):
-    pattern = rf"==+\s*{re.escape(title)}\s*==+(.+?)(?===+\s*\S)"
+def _wiki_find_section(wikitext, title_pattern):
+    pattern = rf"==+\s*{title_pattern}\s*==+(.+?)(?===+\s*\S)"
     m = re.search(pattern, wikitext, re.DOTALL)
     return m.group(1) if m else ""
 
+# Six Nations
+JOURNEES_6N = [
+    ("Première journée", "J1"),
+    ("Deuxième journée", "J2"),
+    ("Troisième journée", "J3"),
+    ("Quatrième journée", "J4"),
+    ("Cinquième journée", "J5"),
+]
+
 def collect_six_nations(year=2026):
-    """Scrape un Tournoi des Six Nations via l'API Wikipedia."""
     page = f"Tournoi_des_Six_Nations_{year}"
     url = f"{WIKI_API}?action=parse&page={page}&format=json&prop=wikitext&utf8=1"
     data = get_json(url)
     wikitext = data["parse"]["wikitext"]["*"]
-    
     out = []
     for section_title, phase in JOURNEES_6N:
-        section = _wiki_find_section(wikitext, section_title)
+        section = _wiki_find_section(wikitext, re.escape(section_title))
         if not section:
             continue
         for tpl in _wiki_extract_templates(section):
@@ -379,25 +344,76 @@ def collect_six_nations(year=2026):
             start_utc = combine_date_time_paris(m["date"], m["time_local"]) if m["time_local"] else None
             out.append({
                 "id": slug("six-nations", year, m["date"], m["home"], m["away"]),
-                "sport": "Rugby",
-                "competition": "Tournoi des VI Nations",
-                "date": m["date"],
-                "start": start_utc,
+                "sport": "Rugby", "competition": "Tournoi des VI Nations",
+                "date": m["date"], "start": start_utc,
                 "tbd": start_utc is None and m["score"] is None,
-                "home": m["home"],
-                "away": m["away"],
-                "score": m["score"],
+                "home": m["home"], "away": m["away"], "score": m["score"],
                 "status": "finished" if m["score"] else "scheduled",
-                "group": phase,
-                "venue": m["venue"],
+                "group": phase, "venue": m["venue"],
             })
     return out
 
-# ---------------------------------------------------------------- main
+# Championnat des nations
+# Sections nommées "{{1re}} journée", "{{2e}} journée"... dans le wikicode
+JOURNEES_NATIONS = [
+    (r"\{\{1re\}\}\s+journée", "J1"),
+    (r"\{\{2e\}\}\s+journée", "J2"),
+    (r"\{\{3e\}\}\s+journée", "J3"),
+    (r"\{\{4e\}\}\s+journée", "J4"),
+    (r"\{\{5e\}\}\s+journée", "J5"),
+    (r"\{\{6e\}\}\s+journée", "J6"),
+]
+
+def collect_nations_championship(year=2026):
+    page = f"Championnat_des_nations_{year}"
+    url = f"{WIKI_API}?action=parse&page={page}&format=json&prop=wikitext&utf8=1"
+    data = get_json(url)
+    wikitext = data["parse"]["wikitext"]["*"]
+    out = []
+    
+    # 6 journées
+    for section_pattern, phase in JOURNEES_NATIONS:
+        section = _wiki_find_section(wikitext, section_pattern)
+        if not section:
+            continue
+        for tpl in _wiki_extract_templates(section):
+            m = _wiki_parse_match_template(tpl)
+            if not m.get("home") or not m.get("away"):
+                continue
+            start_utc = combine_date_time_paris(m["date"], m["time_local"]) if m["time_local"] else None
+            out.append({
+                "id": slug("nations-championship", year, m["date"], m["home"], m["away"]),
+                "sport": "Rugby", "competition": "Championnat des nations",
+                "date": m["date"], "start": start_utc,
+                "tbd": start_utc is None and m["score"] is None,
+                "home": m["home"], "away": m["away"], "score": m["score"],
+                "status": "finished" if m["score"] else "scheduled",
+                "group": phase, "venue": m["venue"],
+            })
+    
+    # Week-end final
+    section = _wiki_find_section(wikitext, "Finales")
+    if section:
+        for tpl in _wiki_extract_templates(section):
+            m = _wiki_parse_match_template(tpl)
+            if not m.get("home") or not m.get("away"):
+                continue
+            start_utc = combine_date_time_paris(m["date"], m["time_local"]) if m["time_local"] else None
+            out.append({
+                "id": slug("nations-championship", year, "finale", m["date"], m["home"], m["away"]),
+                "sport": "Rugby", "competition": "Championnat des nations",
+                "date": m["date"], "start": start_utc,
+                "tbd": start_utc is None and m["score"] is None,
+                "home": m["home"], "away": m["away"], "score": m["score"],
+                "status": "finished" if m["score"] else "scheduled",
+                "group": "Finale", "venue": m["venue"],
+            })
+    
+    return out
+
 def main():
     matches, sources = [], []
 
-    # Football
     for name, url in OPENFOOTBALL:
         try:
             rows = collect_openfootball(name, url)
@@ -408,7 +424,6 @@ def main():
             sources.append({"name": name, "sport": "Football", "ok": False, "error": str(e)})
             print(f"[!!] {name}: {e}", file=sys.stderr)
 
-    # Rugby Top 14
     try:
         rows = collect_top14("2025-2026")
         matches += rows
@@ -418,7 +433,6 @@ def main():
         sources.append({"name": "Top 14", "sport": "Rugby", "ok": False, "error": str(e)})
         print(f"[!!] Top 14: {e}", file=sys.stderr)
 
-    # Rugby Tournoi des Six Nations
     try:
         rows = collect_six_nations(2026)
         matches += rows
@@ -428,7 +442,15 @@ def main():
         sources.append({"name": "Tournoi des VI Nations", "sport": "Rugby", "ok": False, "error": str(e)})
         print(f"[!!] Tournoi des VI Nations: {e}", file=sys.stderr)
 
-    # dédoublonnage + tri
+    try:
+        rows = collect_nations_championship(2026)
+        matches += rows
+        sources.append({"name": "Championnat des nations", "sport": "Rugby", "ok": True, "count": len(rows)})
+        print(f"[ok] Championnat des nations: {len(rows)} matchs")
+    except Exception as e:
+        sources.append({"name": "Championnat des nations", "sport": "Rugby", "ok": False, "error": str(e)})
+        print(f"[!!] Championnat des nations: {e}", file=sys.stderr)
+
     seen, uniq = set(), []
     for m in matches:
         if m["id"] in seen:
