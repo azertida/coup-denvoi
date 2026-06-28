@@ -411,6 +411,45 @@ def collect_nations_championship(year=2026):
     
     return out
 
+# Coupes d'Europe EPCR (Champions Cup / Challenge Cup) depuis Wikipedia.
+# On vise la saison à venir, avec repli sur celle qui vient de finir tant que
+# la page de la nouvelle édition n'a pas encore ses matchs.
+def epcr_seasons():
+    now = datetime.now(timezone.utc)
+    y, m = now.year, now.month
+    if m >= 6:
+        return [f"{y}-{y+1}", f"{y-1}-{y}"]
+    return [f"{y-1}-{y}", f"{y-2}-{y-1}"]
+
+def collect_epcr_cup(competition, page_base, id_prefix):
+    """Extrait tous les {{Match rugby}} de la page d'une édition EPCR."""
+    for s in epcr_seasons():
+        page = f"{page_base}_{s}"
+        url = f"{WIKI_API}?action=parse&page={page}&format=json&prop=wikitext&utf8=1"
+        try:
+            data = get_json(url)
+            wikitext = data["parse"]["wikitext"]["*"]
+        except Exception:
+            continue
+        out = []
+        for tpl in _wiki_extract_templates(wikitext):
+            m = _wiki_parse_match_template(tpl)
+            if not m.get("home") or not m.get("away"):
+                continue
+            start_utc = combine_date_time_paris(m["date"], m["time_local"]) if m["time_local"] else None
+            out.append({
+                "id": slug(id_prefix, s, m["date"], m["home"], m["away"]),
+                "sport": "Rugby", "competition": competition,
+                "date": m["date"], "start": start_utc,
+                "tbd": start_utc is None and m["score"] is None,
+                "home": m["home"], "away": m["away"], "score": m["score"],
+                "status": "finished" if m["score"] else "scheduled",
+                "group": None, "venue": m["venue"],
+            })
+        if out:
+            return out
+    return []
+
 def main():
     matches, sources = [], []
 
@@ -450,6 +489,19 @@ def main():
     except Exception as e:
         sources.append({"name": "Championnat des nations", "sport": "Rugby", "ok": False, "error": str(e)})
         print(f"[!!] Championnat des nations: {e}", file=sys.stderr)
+
+    for competition, page_base, id_prefix in [
+        ("Champions Cup", "Champions_Cup", "champions-cup"),
+        ("Challenge Cup", "Challenge_Cup", "challenge-cup"),
+    ]:
+        try:
+            rows = collect_epcr_cup(competition, page_base, id_prefix)
+            matches += rows
+            sources.append({"name": competition, "sport": "Rugby", "ok": True, "count": len(rows)})
+            print(f"[ok] {competition}: {len(rows)} matchs")
+        except Exception as e:
+            sources.append({"name": competition, "sport": "Rugby", "ok": False, "error": str(e)})
+            print(f"[!!] {competition}: {e}", file=sys.stderr)
 
     seen, uniq = set(), []
     for m in matches:
