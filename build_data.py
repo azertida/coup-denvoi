@@ -421,6 +421,10 @@ def epcr_seasons():
         return [f"{y}-{y+1}", f"{y-1}-{y}"]
     return [f"{y-1}-{y}", f"{y-2}-{y-1}"]
 
+def edition_years():
+    y = datetime.now(timezone.utc).year
+    return [y + 1, y, y - 1]     # compétitions annuelles : édition la plus récente disponible
+
 def collect_epcr_cup(competition, page_base, id_prefix):
     """Extrait tous les {{Match rugby}} de la page d'une édition EPCR."""
     for s in epcr_seasons():
@@ -464,28 +468,49 @@ def main():
             print(f"[!!] {name}: {e}", file=sys.stderr)
 
     try:
-        rows = collect_top14("2025-2026")
+        rows, used = [], None
+        for s in epcr_seasons():        # vise la saison à venir (2026-2027), repli sur 2025-2026
+            rows = collect_top14(s)
+            if rows:
+                used = s
+                break
         matches += rows
-        sources.append({"name": "Top 14", "sport": "Rugby", "ok": True, "count": len(rows)})
-        print(f"[ok] Top 14: {len(rows)} matchs")
+        sources.append({"name": "Top 14", "sport": "Rugby", "ok": True, "count": len(rows), "season": used})
+        print(f"[ok] Top 14 ({used}): {len(rows)} matchs")
     except Exception as e:
         sources.append({"name": "Top 14", "sport": "Rugby", "ok": False, "error": str(e)})
         print(f"[!!] Top 14: {e}", file=sys.stderr)
 
     try:
-        rows = collect_six_nations(2026)
+        rows, used = [], None
+        for yr in edition_years():          # édition à venir d'abord, repli sur la précédente
+            try:
+                r = collect_six_nations(yr)
+            except Exception:
+                r = []
+            if r:
+                rows, used = r, yr
+                break
         matches += rows
-        sources.append({"name": "Tournoi des VI Nations", "sport": "Rugby", "ok": True, "count": len(rows)})
-        print(f"[ok] Tournoi des VI Nations: {len(rows)} matchs")
+        sources.append({"name": "Tournoi des VI Nations", "sport": "Rugby", "ok": True, "count": len(rows), "year": used})
+        print(f"[ok] Tournoi des VI Nations ({used}): {len(rows)} matchs")
     except Exception as e:
         sources.append({"name": "Tournoi des VI Nations", "sport": "Rugby", "ok": False, "error": str(e)})
         print(f"[!!] Tournoi des VI Nations: {e}", file=sys.stderr)
 
     try:
-        rows = collect_nations_championship(2026)
+        rows, used = [], None
+        for yr in edition_years():
+            try:
+                r = collect_nations_championship(yr)
+            except Exception:
+                r = []
+            if r:
+                rows, used = r, yr
+                break
         matches += rows
-        sources.append({"name": "Championnat des nations", "sport": "Rugby", "ok": True, "count": len(rows)})
-        print(f"[ok] Championnat des nations: {len(rows)} matchs")
+        sources.append({"name": "Championnat des nations", "sport": "Rugby", "ok": True, "count": len(rows), "year": used})
+        print(f"[ok] Championnat des nations ({used}): {len(rows)} matchs")
     except Exception as e:
         sources.append({"name": "Championnat des nations", "sport": "Rugby", "ok": False, "error": str(e)})
         print(f"[!!] Championnat des nations: {e}", file=sys.stderr)
