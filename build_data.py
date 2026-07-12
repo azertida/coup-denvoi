@@ -79,8 +79,9 @@ def collect_openfootball(name, url):
         if not date:
             continue
         start, tbd = parse_openfootball_time(date, m.get("time"))
-        ft = (m.get("score") or {}).get("ft")
-        score = f"{ft[0]}\u2013{ft[1]}" if ft and len(ft) == 2 else None
+        sc = m.get("score") or {}
+        final = sc.get("et") or sc.get("ft")   # score après prolongation prioritaire s'il existe
+        score = f"{final[0]}\u2013{final[1]}" if final and len(final) == 2 else None
         h, a = m.get("team1"), m.get("team2")
         out.append({
             "id": slug(name, date, h, a),
