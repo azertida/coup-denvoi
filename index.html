@@ -104,6 +104,10 @@
   .empty strong{color:var(--text);display:block;margin-bottom:6px;font-weight:500}
 
   @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+  /* seconde rangée : compétitions */
+  .chips-comp{margin-top:2px;padding-top:10px;border-top:1px solid var(--line)}
+  .chip-sm{font-size:.74rem;padding:5px 11px}
 </style>
 </head>
 <body>
@@ -134,10 +138,11 @@
 
 <script>
 const TZ = "Europe/Brussels";
-const LS = { sport:"coupdenvoi_sport", range:"coupdenvoi_range" };
+const LS = { sport:"coupdenvoi_sport", comp:"coupdenvoi_comp", range:"coupdenvoi_range" };
 
 let data = null;
 let sportFilter = localStorage.getItem(LS.sport) || "all";
+let compFilter  = localStorage.getItem(LS.comp)  || "all";
 let rangeFilter = localStorage.getItem(LS.range) || "upcoming";
 
 const $ = id => document.getElementById(id);
@@ -165,16 +170,50 @@ function renderMeta(){
   $("metaLine").innerHTML = `<span>maj ${gen}</span>${srcs}`;
 }
 
-/* ---- puces de sport (dérivées des données) ---- */
+/* ---- puces : sports puis compétitions (dérivées des données affichées) ----
+   Une compétition n'a un bouton que si elle a un match dans la plage courante.
+   data.matches est trié par date -> compétition la plus proche en premier.     */
 function renderChips(){
   const sports = [...new Set((data.matches||[]).map(m => m.sport))].sort();
-  const chips = [["all","Tous"], ...sports.map(s => [s,s])];
-  $("sportChips").innerHTML = chips.map(([v,l]) =>
+
+  // compétitions visibles dans la plage courante (et le sport courant)
+  const comps = [];
+  for(const m of (data.matches||[])){
+    const d = evDate(m);
+    if(!d || !withinFilter(d)) continue;
+    if(sportFilter !== "all" && m.sport !== sportFilter) continue;
+    if(compFilter !== "all" && m.competition !== compFilter) continue;
+    if(!comps.includes(m.competition)) comps.push(m.competition);
+  }
+
+  // la compétition sélectionnée n'est plus visible -> on relâche le filtre
+  if(compFilter !== "all" && !comps.includes(compFilter)){
+    compFilter = "all"; localStorage.setItem(LS.comp, "all");
+  }
+
+  const sportRow = [["all","Tous"], ...sports.map(s => [s,s])].map(([v,l]) =>
     `<button class="chip ${sportFilter===v?"active":""}" data-sport="${esc(v)}">${esc(l)}</button>`
   ).join("");
-  $("sportChips").querySelectorAll(".chip").forEach(c =>
+
+  const compRow = comps.length > 1
+    ? `<div class="chips chips-comp">` +
+      [["all","Toutes"], ...comps.map(c => [c,c])].map(([v,l]) =>
+        `<button class="chip chip-sm ${compFilter===v?"active":""}" data-comp="${esc(v)}">${esc(l)}</button>`
+      ).join("") + `</div>`
+    : "";
+
+  $("sportChips").innerHTML = sportRow + compRow;
+
+  $("sportChips").querySelectorAll("[data-sport]").forEach(c =>
     c.addEventListener("click", () => {
       sportFilter = c.dataset.sport; localStorage.setItem(LS.sport, sportFilter);
+      compFilter = "all"; localStorage.setItem(LS.comp, "all");   // on repart propre
+      renderChips(); renderAgenda();
+    })
+  );
+  $("sportChips").querySelectorAll("[data-comp]").forEach(c =>
+    c.addEventListener("click", () => {
+      compFilter = c.dataset.comp; localStorage.setItem(LS.comp, compFilter);
       renderChips(); renderAgenda();
     })
   );
@@ -217,6 +256,7 @@ function renderAgenda(){
   const rows = [];
   for(const m of data.matches){
     if(sportFilter !== "all" && m.sport !== sportFilter) continue;
+    if(compFilter !== "all" && m.competition !== compFilter) continue;
     const d = evDate(m);
     if(!d) continue;
     if(!inRange(d, m)) continue;
@@ -266,7 +306,7 @@ $("filters").addEventListener("click", e => {
   const b = e.target.closest(".filter"); if(!b) return;
   rangeFilter = b.dataset.range; localStorage.setItem(LS.range, rangeFilter);
   document.querySelectorAll(".filter").forEach(x => x.classList.toggle("active", x===b));
-  renderAgenda();
+  renderChips(); renderAgenda();
 });
 
 $("refresh").addEventListener("click", () => {
