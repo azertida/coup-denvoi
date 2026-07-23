@@ -157,7 +157,8 @@ async function loadData(){
     renderMeta(); renderChips(); renderAgenda();
   }catch(e){
     $("agenda").innerHTML = `<div class="empty"><strong>Données indisponibles</strong>
-      Le fichier <code>matches.json</code> n'a pas pu être chargé. Vérifie que la GitHub Action a bien tourné et publié le fichier.</div>`;
+      Le fichier <code>matches.json</code> n'a pas pu être chargé ou affiché.<br>
+      <small style="opacity:.7">${esc(e.message || e)}</small></div>`;
   }
 }
 
@@ -180,7 +181,7 @@ function renderChips(){
   const comps = [];
   for(const m of (data.matches||[])){
     const d = evDate(m);
-    if(!d || !withinFilter(d)) continue;
+    if(!d || !inRange(d, m)) continue;
     if(sportFilter !== "all" && m.sport !== sportFilter) continue;
     if(compFilter !== "all" && m.competition !== compFilter) continue;
     if(!comps.includes(m.competition)) comps.push(m.competition);
