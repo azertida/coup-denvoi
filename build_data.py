@@ -412,6 +412,36 @@ def collect_nations_championship(year=2026):
     
     return out
 
+def collect_nations_cup(year=2026):
+    # Coupe des nations (World Rugby Nations Cup) : second échelon du Championnat
+    # des nations, biennal (années paires). Structure de page différente (deux
+    # poules, fenêtres juillet/novembre, matchs de classement) -> on extrait tous
+    # les {{Match rugby}} de la page plutôt que de deviner les titres de sections.
+    page = f"Coupe_des_nations_{year}"
+    url = f"{WIKI_API}?action=parse&page={page}&format=json&prop=wikitext&utf8=1"
+    data = get_json(url)
+    wikitext = data["parse"]["wikitext"]["*"]
+    out, seen = [], set()
+    for tpl in _wiki_extract_templates(wikitext):
+        m = _wiki_parse_match_template(tpl)
+        if not m.get("home") or not m.get("away"):
+            continue
+        key = (m["date"], m["home"], m["away"])
+        if key in seen:
+            continue
+        seen.add(key)
+        start_utc = combine_date_time_paris(m["date"], m["time_local"]) if m["time_local"] else None
+        out.append({
+            "id": slug("nations-cup", year, m["date"], m["home"], m["away"]),
+            "sport": "Rugby", "competition": "Coupe des nations",
+            "date": m["date"], "start": start_utc,
+            "tbd": start_utc is None and m["score"] is None,
+            "home": m["home"], "away": m["away"], "score": m["score"],
+            "status": "finished" if m["score"] else "scheduled",
+            "group": None, "venue": m["venue"],
+        })
+    return out
+
 # Coupes d'Europe EPCR (Champions Cup / Challenge Cup) depuis Wikipedia.
 # On vise la saison à venir, avec repli sur celle qui vient de finir tant que
 # la page de la nouvelle édition n'a pas encore ses matchs.
@@ -515,6 +545,23 @@ def main():
     except Exception as e:
         sources.append({"name": "Championnat des nations", "sport": "Rugby", "ok": False, "error": str(e)})
         print(f"[!!] Championnat des nations: {e}", file=sys.stderr)
+
+    try:
+        rows, used = [], None
+        for yr in edition_years():
+            try:
+                r = collect_nations_cup(yr)
+            except Exception:
+                r = []
+            if r:
+                rows, used = r, yr
+                break
+        matches += rows
+        sources.append({"name": "Coupe des nations", "sport": "Rugby", "ok": True, "count": len(rows), "year": used})
+        print(f"[ok] Coupe des nations ({used}): {len(rows)} matchs")
+    except Exception as e:
+        sources.append({"name": "Coupe des nations", "sport": "Rugby", "ok": False, "error": str(e)})
+        print(f"[!!] Coupe des nations: {e}", file=sys.stderr)
 
     for competition, page_base, id_prefix in [
         ("Champions Cup", "Champions_Cup", "champions-cup"),
