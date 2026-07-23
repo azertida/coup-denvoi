@@ -194,7 +194,6 @@ function renderChips(){
     const d = evDate(m);
     if(!d || !inRange(d, m)) continue;
     if(sportFilter !== "all" && m.sport !== sportFilter) continue;
-    if(compFilter !== "all" && m.competition !== compFilter) continue;
     if(!comps.includes(m.competition)) comps.push(m.competition);
   }
 
