@@ -105,9 +105,20 @@
 
   @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 
-  /* seconde rangée : compétitions */
-  .chips-comp{margin-top:2px;padding-top:10px;border-top:1px solid var(--line)}
-  .chip-sm{font-size:.74rem;padding:5px 11px}
+  /* sélecteur de compétition */
+  .comp-select{
+    flex:1 1 100%; margin-top:2px; padding:10px 34px 10px 14px;
+    background:var(--surface); border:1px solid var(--line); border-radius:20px;
+    color:var(--muted); font-family:inherit; font-size:.82rem; cursor:pointer;
+    -webkit-appearance:none; appearance:none;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path d='M1 1l5 5 5-5' fill='none' stroke='%238b93a7' stroke-width='1.6'/></svg>");
+    background-repeat:no-repeat; background-position:right 14px center;
+  }
+  .comp-select:focus{outline:none; border-color:var(--accent)}
+  .comp-select.filtered{
+    border-color:var(--accent); color:var(--accent);
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path d='M1 1l5 5 5-5' fill='none' stroke='%23ffd66b' stroke-width='1.6'/></svg>");
+  }
 </style>
 </head>
 <body>
@@ -196,14 +207,14 @@ function renderChips(){
     `<button class="chip ${sportFilter===v?"active":""}" data-sport="${esc(v)}">${esc(l)}</button>`
   ).join("");
 
-  const compRow = comps.length > 1
-    ? `<div class="chips chips-comp">` +
-      [["all","Toutes"], ...comps.map(c => [c,c])].map(([v,l]) =>
-        `<button class="chip chip-sm ${compFilter===v?"active":""}" data-comp="${esc(v)}">${esc(l)}</button>`
-      ).join("") + `</div>`
+  const compSelect = comps.length > 1
+    ? `<select class="comp-select${compFilter!=="all"?" filtered":""}" id="compSelect" aria-label="Filtrer par compétition">` +
+      [["all","Toutes les compétitions"], ...comps.map(c => [c,c])].map(([v,l]) =>
+        `<option value="${esc(v)}"${compFilter===v?" selected":""}>${esc(l)}</option>`
+      ).join("") + `</select>`
     : "";
 
-  $("sportChips").innerHTML = sportRow + compRow;
+  $("sportChips").innerHTML = sportRow + compSelect;
 
   $("sportChips").querySelectorAll("[data-sport]").forEach(c =>
     c.addEventListener("click", () => {
@@ -212,12 +223,12 @@ function renderChips(){
       renderChips(); renderAgenda();
     })
   );
-  $("sportChips").querySelectorAll("[data-comp]").forEach(c =>
-    c.addEventListener("click", () => {
-      compFilter = c.dataset.comp; localStorage.setItem(LS.comp, compFilter);
-      renderChips(); renderAgenda();
-    })
-  );
+  const sel = $("compSelect");
+  if(sel) sel.addEventListener("change", () => {
+    compFilter = sel.value; localStorage.setItem(LS.comp, compFilter);
+    sel.classList.toggle("filtered", compFilter !== "all");
+    renderAgenda();
+  });
 }
 
 /* ---- dates / fuseau ---- */
