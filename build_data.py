@@ -8,7 +8,7 @@ Sources :
   - Rugby     : Top 14 (LNR), VI Nations (Wikipedia), Championnat des nations (Wikipedia)
 """
 
-import json, re, sys, time, urllib.request, urllib.error
+import json, re, sys, time, urllib.request, urllib.error, urllib.parse
 from datetime import datetime, timezone, timedelta
 
 TIMEOUT = 30
@@ -213,7 +213,7 @@ def _wiki_parse_team(text):
     if not text:
         return None
     text = text.replace("'''", "")
-    m = re.search(r"\{\{([A-Za-zÀ-ÿ\s\-]+?)\s+rugby\s*[|}]", text)
+    m = re.search(r"\{\{([A-Za-zÀ-ÿ\s\-]+?)\s+rugby(?:\s+(?:féminin|masculin|à\s+(?:XV|sept)))?\s*[|}]", text)
     if m:
         return m.group(1).strip()
     m = re.search(r"\[\[(?:Équipe d['e]\s+)?([^\]|]+?)(?:\s+de rugby[^]]*)?(?:\|[^\]]*)?\]\]", text)
@@ -442,6 +442,51 @@ def collect_nations_cup(year=2026):
         })
     return out
 
+def combine_date_time_sydney(date_iso, time_str):
+    # Sydney/Melbourne en oct.-nov. = heure d'été australienne (AEDT, UTC+11).
+    if not date_iso or not time_str:
+        return None
+    try:
+        y, mo, d = (int(x) for x in date_iso.split("-"))
+        hh, mm = (int(x) for x in time_str.split(":"))
+        local = datetime(y, mo, d, hh, mm, tzinfo=timezone(timedelta(hours=11)))
+        return iso_z(local)
+    except Exception:
+        return None
+
+def collect_rwc(year=2027, tz="paris"):
+    # Coupe du monde de rugby (Australie 2027). Page à poules -> extraction entière.
+    # tz="paris" par défaut : À VÉRIFIER quand les matchs seront datés, contre un
+    # match connu (Australie-Hong Kong, 1 oct. 2027, Perth). Si les horaires du
+    # wikicode sont en heure australienne, passer tz="sydney".
+    page = f"Coupe_du_monde_masculine_de_rugby_à_XV_{year}"
+    url = f"{WIKI_API}?action=parse&page={urllib.parse.quote(page)}&format=json&prop=wikitext&utf8=1"
+    data = get_json(url)
+    if "parse" not in data:
+        return []
+    wikitext = data["parse"]["wikitext"]["*"]
+    conv = combine_date_time_sydney if tz == "sydney" else combine_date_time_paris
+    out, seen = [], set()
+    for tpl in _wiki_extract_templates(wikitext):
+        m = _wiki_parse_match_template(tpl)
+        if not m.get("home") or not m.get("away") or not m.get("date"):
+            continue
+        key = (m["date"], m["home"], m["away"])
+        if key in seen:
+            continue
+        seen.add(key)
+        start_utc = conv(m["date"], m["time_local"]) if m["time_local"] else None
+        out.append({
+            "id": slug("rwc", year, m["date"], m["home"], m["away"]),
+            "sport": "Rugby", "competition": "Coupe du monde de rugby",
+            "date": m["date"], "start": start_utc,
+            "tbd": start_utc is None and m["score"] is None,
+            "home": m["home"], "away": m["away"], "score": m["score"],
+            "status": "finished" if m["score"] else "scheduled",
+            "group": None, "venue": m["venue"],
+        })
+    return out
+
 # Coupes d'Europe EPCR (Champions Cup / Challenge Cup) depuis Wikipedia.
 # On vise la saison à venir, avec repli sur celle qui vient de finir tant que
 # la page de la nouvelle édition n'a pas encore ses matchs.
@@ -562,6 +607,21 @@ def main():
     except Exception as e:
         sources.append({"name": "Coupe des nations", "sport": "Rugby", "ok": False, "error": str(e)})
         print(f"[!!] Coupe des nations: {e}", file=sys.stderr)
+
+    # Coupe du monde de rugby 2027 (Australie). Dormant tant que Wikipédia n'a pas
+    # daté les matchs ; le fuseau (Paris vs Sydney) reste à vérifier au moment venu.
+    try:
+        rwc = collect_rwc(2027, tz="paris")
+        matches += rwc
+        entry = {"name": "Coupe du monde de rugby", "sport": "Rugby", "ok": True, "count": len(rwc), "year": 2027}
+        if rwc:
+            s = rwc[0]
+            entry["sample"] = f"{s['home']} v {s['away']} {s['date']} start={s['start']}"
+        sources.append(entry)
+        print(f"[ok] Coupe du monde de rugby (2027): {len(rwc)}" + (f"  ex: {entry.get('sample')}" if rwc else ""))
+    except Exception as e:
+        sources.append({"name": "Coupe du monde de rugby", "sport": "Rugby", "ok": False, "error": str(e)})
+        print(f"[!!] Coupe du monde de rugby: {e}", file=sys.stderr)
 
     for competition, page_base, id_prefix in [
         ("Champions Cup", "Champions_Cup", "champions-cup"),
