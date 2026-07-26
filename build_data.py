@@ -98,8 +98,9 @@ def collect_openfootball(name, url):
         })
     return out
 
-# Top 14 (LNR)
-LNR_BASE = "https://top14.lnr.fr/calendrier-et-resultats"
+# LNR (Top 14 et Pro D2 : sites jumeaux, structure d'URL identique)
+LNR_TOP14 = "https://top14.lnr.fr/calendrier-et-resultats"
+LNR_PROD2 = "https://prod2.lnr.fr/calendrier-et-resultats"
 
 def parse_french_date(date_fr, season_start_year):
     if not date_fr:
@@ -153,23 +154,23 @@ def _lnr_parse_page(html, phase_label, season_start_year):
             })
     return matches
 
-def collect_top14(season="2025-2026"):
+def collect_lnr(season, base, competition, id_prefix, n_journees):
     season_start = int(season.split("-")[0])
-    phases = [(f"J{n}", f"j{n}") for n in range(1, 27)]
+    phases = [(f"J{n}", f"j{n}") for n in range(1, n_journees + 1)]
     phases += [("Barrage", "barrage"), ("Demi-finale", "demi-finale"), ("Finale", "finale")]
     out = []
     for phase_label, slug_phase in phases:
-        url = f"{LNR_BASE}/{season}/{slug_phase}"
+        url = f"{base}/{season}/{slug_phase}"
         try:
             html = get_text(url)
         except Exception as e:
-            print(f"  [!!] LNR {phase_label} : {e}", file=sys.stderr)
+            print(f"  [!!] LNR {competition} {phase_label} : {e}", file=sys.stderr)
             continue
         for m in _lnr_parse_page(html, phase_label, season_start):
             start_utc = combine_date_time_paris(m["date"], m["time_local"]) if m["time_local"] else None
             out.append({
-                "id": slug("top-14", m["date"], m["home"], m["away"]),
-                "sport": "Rugby", "competition": "Top 14",
+                "id": slug(id_prefix, m["date"], m["home"], m["away"]),
+                "sport": "Rugby", "competition": competition,
                 "date": m["date"], "start": start_utc,
                 "tbd": start_utc is None and m["score"] is None,
                 "home": m["home"], "away": m["away"], "score": m["score"],
@@ -178,6 +179,12 @@ def collect_top14(season="2025-2026"):
             })
         time.sleep(0.5)
     return out
+
+def collect_top14(season="2025-2026"):
+    return collect_lnr(season, LNR_TOP14, "Top 14", "top-14", 26)
+
+def collect_prod2(season="2025-2026"):
+    return collect_lnr(season, LNR_PROD2, "Pro D2", "pro-d2", 30)
 
 # Wikipedia rugby helpers
 WIKI_API = "https://fr.wikipedia.org/w/api.php"
@@ -556,6 +563,20 @@ def main():
     except Exception as e:
         sources.append({"name": "Top 14", "sport": "Rugby", "ok": False, "error": str(e)})
         print(f"[!!] Top 14: {e}", file=sys.stderr)
+
+    try:
+        rows, used = [], None
+        for s in epcr_seasons():        # même logique de saison que le Top 14
+            rows = collect_prod2(s)
+            if rows:
+                used = s
+                break
+        matches += rows
+        sources.append({"name": "Pro D2", "sport": "Rugby", "ok": True, "count": len(rows), "season": used})
+        print(f"[ok] Pro D2 ({used}): {len(rows)} matchs")
+    except Exception as e:
+        sources.append({"name": "Pro D2", "sport": "Rugby", "ok": False, "error": str(e)})
+        print(f"[!!] Pro D2: {e}", file=sys.stderr)
 
     try:
         rows, used = [], None
