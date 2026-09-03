@@ -119,6 +119,10 @@
     border-color:var(--accent); color:var(--accent);
     background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path d='M1 1l5 5 5-5' fill='none' stroke='%23ffd66b' stroke-width='1.6'/></svg>");
   }
+
+  /* équipes suivies : mise en évidence (sans décalage de mise en page) */
+  .match.fav-match{box-shadow:inset 3px 0 0 var(--accent);background:linear-gradient(90deg,rgba(255,214,107,.07),transparent 55%)}
+  .teams .fav{color:var(--accent);font-weight:700}
 </style>
 </head>
 <body>
@@ -261,6 +265,22 @@ function inRange(d, m){
 }
 
 /* ---- agenda ---- */
+/* ---- équipes suivies ---- */
+// Rugby : France, Italie, Japon, UBB — Espagne : rugby + football
+// sport absent = mise en évidence dans tous les sports
+const FAVS = [
+  { n:"France",   sport:"Rugby" },
+  { n:"Italie",   sport:"Rugby" },
+  { n:"Japon",    sport:"Rugby" },
+  { n:"Bordeaux", sport:"Rugby" },   // Union Bordeaux Bègles / Bordeaux-Bègles
+  { n:"UBB",      sport:"Rugby" },
+  { n:"Espagne" },                   // graphie rugby
+  { n:"Spain"   },                   // graphie football
+];
+const isFav = (n, sport) => { const s = (n||"").toLowerCase();
+  return FAVS.some(f => s.includes(f.n.toLowerCase()) && (!f.sport || f.sport === sport)); };
+const teamHtml = (n, sport) => isFav(n, sport) ? `<span class="fav">${esc(n)}</span>` : esc(n);
+
 function renderAgenda(){
   if(!data || !data.matches){ return; }
 
@@ -295,13 +315,14 @@ function renderAgenda(){
       const left = m.score
         ? `<span class="score">${esc(m.score)}</span>`
         : (m.tbd ? '<span class="tbd">à venir</span>' : hhmm(d));
-      const away = m.away ? `<span class="vs">vs</span>${esc(m.away)}` : "";
+      const away = m.away ? `<span class="vs">vs</span>${teamHtml(m.away, m.sport)}` : "";
+      const favRow = isFav(m.home, m.sport) || isFav(m.away, m.sport);
       const grp  = m.group ? " · " + esc(m.group) : "";
       const cd = countdown(d);
-      html += `<div class="match">
+      html += `<div class="match${favRow ? " fav-match" : ""}">
         <div class="kickoff">${left}</div>
         <div class="match-body">
-          <div class="teams">${esc(m.home||"—")}${away}</div>
+          <div class="teams">${m.home ? teamHtml(m.home, m.sport) : "—"}${away}</div>
           <div class="match-meta"><span class="sport-tag">${esc(m.sport)}</span> · ${esc(m.competition)}${grp}</div>
         </div>
         <div class="countdown ${cd.cls}">${m.score?"terminé":cd.txt}</div>
