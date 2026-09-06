@@ -148,6 +148,13 @@ def _lnr_parse_page(html, phase_label, season_start_year):
                 m = re.match(r"^(\d{1,2})h(\d{2})$", raw)
                 if m:
                     time_str = f"{int(m.group(1)):02d}:{m.group(2)}"
+                else:
+                    # Repli : pour les matchs à venir, la LNR place l'heure
+                    # ailleurs dans la ligne (à côté des logos diffuseurs).
+                    m = re.search(r"\b(\d{1,2})h(\d{2})\b",
+                                  elem.get_text(" ", strip=True))
+                    if m:
+                        time_str = f"{int(m.group(1)):02d}:{m.group(2)}"
             matches.append({
                 "phase": phase_label, "date": current_date_iso, "time_local": time_str,
                 "home": home, "away": away, "score": score,
