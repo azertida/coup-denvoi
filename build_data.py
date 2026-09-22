@@ -690,33 +690,34 @@ def main():
             sources.append({"name": name, "sport": "Football", "ok": False, "error": str(e)})
             print(f"[!!] {name}: {e}", file=sys.stderr)
 
-    try:
-        rows, used = [], None
-        for s in epcr_seasons():        # vise la saison à venir (2026-2027), repli sur 2025-2026
-            rows = collect_top14(s)
-            if rows:
-                used = s
-                break
-        matches += rows
-        sources.append({"name": "Top 14", "sport": "Rugby", "ok": True, "count": len(rows), "season": used})
-        print(f"[ok] Top 14 ({used}): {len(rows)} matchs")
-    except Exception as e:
-        sources.append({"name": "Top 14", "sport": "Rugby", "ok": False, "error": str(e)})
-        print(f"[!!] Top 14: {e}", file=sys.stderr)
-
-    try:
-        rows, used = [], None
-        for s in epcr_seasons():        # même logique de saison que le Top 14
-            rows = collect_prod2(s)
-            if rows:
-                used = s
-                break
-        matches += rows
-        sources.append({"name": "Pro D2", "sport": "Rugby", "ok": True, "count": len(rows), "season": used})
-        print(f"[ok] Pro D2 ({used}): {len(rows)} matchs")
-    except Exception as e:
-        sources.append({"name": "Pro D2", "sport": "Rugby", "ok": False, "error": str(e)})
-        print(f"[!!] Pro D2: {e}", file=sys.stderr)
+    # Top 14 et Pro D2 débranchés (sept. 2026). Pour les réactiver : retirer les #.
+    # try:
+    #     rows, used = [], None
+    #     for s in epcr_seasons():        # vise la saison à venir (2026-2027), repli sur 2025-2026
+    #         rows = collect_top14(s)
+    #         if rows:
+    #             used = s
+    #             break
+    #     matches += rows
+    #     sources.append({"name": "Top 14", "sport": "Rugby", "ok": True, "count": len(rows), "season": used})
+    #     print(f"[ok] Top 14 ({used}): {len(rows)} matchs")
+    # except Exception as e:
+    #     sources.append({"name": "Top 14", "sport": "Rugby", "ok": False, "error": str(e)})
+    #     print(f"[!!] Top 14: {e}", file=sys.stderr)
+    #
+    # try:
+    #     rows, used = [], None
+    #     for s in epcr_seasons():        # même logique de saison que le Top 14
+    #         rows = collect_prod2(s)
+    #         if rows:
+    #             used = s
+    #             break
+    #     matches += rows
+    #     sources.append({"name": "Pro D2", "sport": "Rugby", "ok": True, "count": len(rows), "season": used})
+    #     print(f"[ok] Pro D2 ({used}): {len(rows)} matchs")
+    # except Exception as e:
+    #     sources.append({"name": "Pro D2", "sport": "Rugby", "ok": False, "error": str(e)})
+    #     print(f"[!!] Pro D2: {e}", file=sys.stderr)
 
     try:
         rows, used = [], None
