@@ -214,7 +214,9 @@ function renderChips(){
 
   const compSelect = comps.length > 1
     ? `<select class="comp-select${compFilter!=="all"?" filtered":""}" id="compSelect" aria-label="Filtrer par compétition">` +
-      [["all","Toutes les compétitions"], ...comps.map(c => [c,c])].map(([v,l]) =>
+      [["all","Toutes les compétitions"], ...comps.slice()
+        .sort((a, b) => a.localeCompare(b, "fr", { sensitivity: "base" }))
+        .map(c => [c,c])].map(([v,l]) =>
         `<option value="${esc(v)}"${compFilter===v?" selected":""}>${esc(l)}</option>`
       ).join("") + `</select>`
     : "";
