@@ -828,6 +828,8 @@ def completer_horaires(matches, idx):
 # compétitions dont on va chercher les horaires chez RugbyPass
 RP_COMPLEMENT = [
     "womens-rugby/wxv", "womens-rugby/wxv-challenger",
+    "womens-internationals",   # RugbyPass y range certains matchs WXV
+    "internationals",          # idem côté masculin
     "six-nations", "womens-six-nations",
     "nations-championship", "world-rugby-nations-cup",
     "rugby-world-cup",
