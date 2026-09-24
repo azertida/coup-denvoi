@@ -677,6 +677,163 @@ def collect_wxv(names, wanted, id_prefix="wxv"):
     return [], None
 
 
+# ================================================================ RUGBYPASS
+# Le JSON des rencontres est embarqué dans la page HTML. Chaque match porte un
+# `epoch` (horodatage absolu) : aucune ambiguïté de fuseau, et le passage à
+# l'heure d'hiver est géré tout seul. Sert en source principale pour les coupes
+# d'Europe, et en complément horaire pour les compétitions dont la source
+# principale (Wikipédia) ne donne que la date.
+RP_BASE = "https://www.rugbypass.com"
+
+def _rp_blocs_json(html):
+    """Tableaux JSON de niveau racine commençant par [{"epoch":."""
+    blocs, i = [], 0
+    while True:
+        d = html.find('[{"epoch":', i)
+        if d == -1:
+            break
+        prof, j, dans_txt, echap = 0, d, False, False
+        while j < len(html):
+            c = html[j]
+            if echap:
+                echap = False
+            elif c == "\\":
+                echap = True
+            elif c == '"':
+                dans_txt = not dans_txt
+            elif not dans_txt:
+                if c in "[{":
+                    prof += 1
+                elif c in "]}":
+                    prof -= 1
+                    if prof == 0:
+                        blocs.append(html[d:j+1]); break
+            j += 1
+        i = j + 1
+    return blocs
+
+def rp_matchs(uri):
+    """Rencontres d'une compétition RugbyPass (uri = segment d'URL)."""
+    html = get_text(f"{RP_BASE}/{uri}/fixtures-results/")
+    out, vus = [], set()
+    for bloc in _rp_blocs_json(html):
+        try:
+            data = json.loads(bloc)
+        except Exception:
+            continue
+        for jour in data:
+            tournois = jour.get("tournaments")
+            listes = tournois if isinstance(tournois, list) else list((tournois or {}).values())
+            for t in listes:
+                for g in t.get("games", []):
+                    h = (g.get("homeTeam") or {}).get("name")
+                    a = (g.get("awayTeam") or {}).get("name")
+                    ep = g.get("epoch")
+                    if not h or not a or not ep:
+                        continue          # phase finale : équipes encore inconnues
+                    cle = (ep, h, a)
+                    if cle in vus:
+                        continue
+                    vus.add(cle)
+                    out.append({
+                        "epoch": ep, "home": h, "away": a,
+                        "round": g.get("round") or None,
+                        "venue": g.get("venue") or None,
+                        "hs": g.get("homeScore"), "as": g.get("awayScore"),
+                        "played": bool(g.get("played")),
+                    })
+    return out
+
+def collect_rugbypass(uri, competition, id_prefix):
+    """Source principale : construit directement les matchs de l'appli."""
+    rows = []
+    for m in rp_matchs(uri):
+        dt = datetime.fromtimestamp(m["epoch"], tz=timezone.utc)
+        date = dt.strftime("%Y-%m-%d")
+        score = (f"{m['hs']}\u2013{m['as']}"
+                 if m["played"] and m["hs"] is not None else None)
+        rows.append({
+            "id": slug(id_prefix, date, m["home"], m["away"]),
+            "sport": "Rugby", "competition": competition,
+            "date": date, "start": iso_z(dt),
+            "tbd": False,
+            "home": m["home"], "away": m["away"], "score": score,
+            "status": "finished" if score else "scheduled",
+            "group": m["round"], "venue": m["venue"],
+        })
+    return rows
+
+# --- complément horaire -------------------------------------------------
+# Noms RugbyPass -> noms utilisés par nos collecteurs Wikipédia (FR).
+RP_VERS_FR = {
+    "New Zealand": "Nouvelle-Zélande", "England": "Angleterre",
+    "South Africa": "Afrique du Sud", "Wales": "Pays de Galles",
+    "United States": "États-Unis", "USA": "États-Unis",
+    "Ireland": "Irlande", "Italy": "Italie", "Scotland": "Écosse",
+    "Japan": "Japon", "Spain": "Espagne", "Australia": "Australie",
+    "France": "France", "Canada": "Canada", "Brazil": "Brésil",
+    "Fiji": "Fidji", "Netherlands": "Pays-Bas", "Samoa": "Samoa",
+    "Hong Kong": "Hong Kong", "Hong Kong China": "Hong Kong",
+    "Georgia": "Géorgie", "Portugal": "Portugal", "Romania": "Roumanie",
+    "Uruguay": "Uruguay", "Chile": "Chili", "Tonga": "Tonga",
+    "Zimbabwe": "Zimbabwe", "Argentina": "Argentine",
+}
+
+def _norm_equipe(nom):
+    """'New Zealand Women' -> 'nouvelle-zélande' (clé d'appariement)."""
+    n = (nom or "").strip()
+    for suff in (" Women", " Men"):
+        if n.endswith(suff):
+            n = n[: -len(suff)]
+    n = RP_VERS_FR.get(n, n)
+    return n.casefold()
+
+def index_rugbypass(uris):
+    """{(jour, {équipe1, équipe2}): epoch} pour compléter les horaires."""
+    idx = {}
+    for uri in uris:
+        try:
+            ms = rp_matchs(uri)
+        except Exception as e:
+            print(f"  [!] RugbyPass {uri}: {e}", file=sys.stderr)
+            continue
+        for m in ms:
+            dt = datetime.fromtimestamp(m["epoch"], tz=timezone.utc)
+            paire = frozenset({_norm_equipe(m["home"]), _norm_equipe(m["away"])})
+            idx[(dt.strftime("%Y-%m-%d"), paire)] = m["epoch"]
+        time.sleep(0.5)
+    return idx
+
+def completer_horaires(matches, idx):
+    """Ajoute l'heure aux matchs qui n'ont qu'une date. Tolérance ±1 jour
+    (un match en Nouvelle-Zélande peut basculer de date une fois en UTC)."""
+    n = 0
+    for m in matches:
+        if m.get("start") or not m.get("date") or m.get("sport") != "Rugby":
+            continue
+        paire = frozenset({_norm_equipe(m.get("home")), _norm_equipe(m.get("away"))})
+        base = datetime.strptime(m["date"], "%Y-%m-%d")
+        for delta in (0, -1, 1):
+            jour = (base + timedelta(days=delta)).strftime("%Y-%m-%d")
+            ep = idx.get((jour, paire))
+            if ep:
+                dt = datetime.fromtimestamp(ep, tz=timezone.utc)
+                m["start"] = iso_z(dt)
+                m["date"] = dt.strftime("%Y-%m-%d")
+                m["tbd"] = False
+                n += 1
+                break
+    return n
+
+# compétitions dont on va chercher les horaires chez RugbyPass
+RP_COMPLEMENT = [
+    "womens-rugby/wxv", "womens-rugby/wxv-challenger",
+    "six-nations", "womens-six-nations",
+    "nations-championship", "world-rugby-nations-cup",
+    "rugby-world-cup",
+]
+
+
 def main():
     matches, sources = [], []
 
@@ -785,18 +942,30 @@ def main():
         sources.append({"name": "Coupe du monde de rugby", "sport": "Rugby", "ok": False, "error": str(e)})
         print(f"[!!] Coupe du monde de rugby: {e}", file=sys.stderr)
 
-    for competition, page_base, id_prefix in [
-        ("Champions Cup", "Champions_Cup", "champions-cup"),
-        ("Challenge Cup", "Challenge_Cup", "challenge-cup"),
+    # Coupes d'Europe : RugbyPass en principal (dates + horaires fiables),
+    # Wikipédia en secours si RugbyPass ne renvoie rien.
+    for competition, uri, page_base, id_prefix in [
+        ("Champions Cup", "european-champions-cup", "Champions_Cup", "champions-cup"),
+        ("Challenge Cup", "challenge-cup", "Challenge_Cup", "challenge-cup"),
     ]:
+        rows, provenance = [], None
         try:
-            rows = collect_epcr_cup(competition, page_base, id_prefix)
-            matches += rows
-            sources.append({"name": competition, "sport": "Rugby", "ok": True, "count": len(rows)})
-            print(f"[ok] {competition}: {len(rows)} matchs")
+            rows = collect_rugbypass(uri, competition, id_prefix)
+            provenance = "RugbyPass"
         except Exception as e:
-            sources.append({"name": competition, "sport": "Rugby", "ok": False, "error": str(e)})
-            print(f"[!!] {competition}: {e}", file=sys.stderr)
+            print(f"  [!] RugbyPass {competition}: {e}", file=sys.stderr)
+        if not rows:
+            try:
+                rows = collect_epcr_cup(competition, page_base, id_prefix)
+                provenance = "Wikipédia"
+            except Exception as e:
+                sources.append({"name": competition, "sport": "Rugby", "ok": False, "error": str(e)})
+                print(f"[!!] {competition}: {e}", file=sys.stderr)
+                continue
+        matches += rows
+        sources.append({"name": competition, "sport": "Rugby", "ok": True,
+                        "count": len(rows), "source": provenance})
+        print(f"[ok] {competition} ({provenance}): {len(rows)} matchs")
 
 
     # WXV (rugby féminin) — Wikipédia EN, tableaux de rencontres
@@ -814,6 +983,18 @@ def main():
     except Exception as e:
         sources.append({"name": "WXV", "sport": "Rugby", "ok": False, "error": str(e)})
         print(f"[!!] WXV: {e}", file=sys.stderr)
+
+    # Complément horaire : pour les matchs datés sans heure (Wikipédia ne donne
+    # souvent que la date), on va chercher l'horaire exact chez RugbyPass.
+    sans_heure = sum(1 for m in matches
+                     if m.get("sport") == "Rugby" and m.get("date") and not m.get("start"))
+    if sans_heure:
+        try:
+            idx = index_rugbypass(RP_COMPLEMENT)
+            comble = completer_horaires(matches, idx)
+            print(f"[ok] Horaires complétés par RugbyPass : {comble}/{sans_heure}")
+        except Exception as e:
+            print(f"[!!] Complément RugbyPass: {e}", file=sys.stderr)
 
     seen, uniq = set(), []
     for m in matches:
