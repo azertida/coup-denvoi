@@ -744,8 +744,15 @@ def rp_matchs(uri):
                     })
     return out
 
-def collect_rugbypass(uri, competition, id_prefix):
-    """Source principale : construit directement les matchs de l'appli."""
+def collect_rugbypass(uri, competition, id_prefix, names=None):
+    """Source principale : construit directement les matchs de l'appli.
+    names : table de traduction des noms (RugbyPass publie en anglais).
+    Les clubs gardent leur nom ; seules les sélections sont traduites."""
+    def _nom(n):
+        if not names:
+            return n
+        base = n[:-6].strip() if n.endswith(" Women") else n
+        return names.get(base, n)
     rows = []
     for m in rp_matchs(uri):
         dt = datetime.fromtimestamp(m["epoch"], tz=timezone.utc)
@@ -753,11 +760,11 @@ def collect_rugbypass(uri, competition, id_prefix):
         score = (f"{m['hs']}\u2013{m['as']}"
                  if m["played"] and m["hs"] is not None else None)
         rows.append({
-            "id": slug(id_prefix, date, m["home"], m["away"]),
+            "id": slug(id_prefix, date, _nom(m["home"]), _nom(m["away"])),
             "sport": "Rugby", "competition": competition,
             "date": date, "start": iso_z(dt),
             "tbd": False,
-            "home": m["home"], "away": m["away"], "score": score,
+            "home": _nom(m["home"]), "away": _nom(m["away"]), "score": score,
             "status": "finished" if score else "scheduled",
             "group": m["round"], "venue": m["venue"],
         })
@@ -940,14 +947,27 @@ def main():
     # Coupe du monde de rugby 2027 (Australie). Dormant tant que Wikipédia n'a pas
     # daté les matchs ; le fuseau (Paris vs Sydney) reste à vérifier au moment venu.
     try:
-        rwc = collect_rwc(2027, tz="paris")
+        # RugbyPass d'abord : World Rugby a publié le calendrier, pas Wikipédia.
+        # Noms traduits en français pour rester cohérent avec le reste de l'appli.
+        rwc, provenance = [], None
+        try:
+            rwc = collect_rugbypass("rugby-world-cup", "Coupe du monde de rugby",
+                                    "rwc", names=RP_VERS_FR)
+            provenance = "RugbyPass"
+        except Exception as e:
+            print(f"  [!] RugbyPass Coupe du monde de rugby: {e}", file=sys.stderr)
+        if not rwc:
+            rwc = collect_rwc(2027, tz="paris")
+            provenance = "Wikipédia"
         matches += rwc
-        entry = {"name": "Coupe du monde de rugby", "sport": "Rugby", "ok": True, "count": len(rwc), "year": 2027}
+        entry = {"name": "Coupe du monde de rugby", "sport": "Rugby", "ok": True,
+                 "count": len(rwc), "year": 2027, "source": provenance}
         if rwc:
             s = rwc[0]
             entry["sample"] = f"{s['home']} v {s['away']} {s['date']} start={s['start']}"
         sources.append(entry)
-        print(f"[ok] Coupe du monde de rugby (2027): {len(rwc)}" + (f"  ex: {entry.get('sample')}" if rwc else ""))
+        print(f"[ok] Coupe du monde de rugby (2027, {provenance}): {len(rwc)}"
+              + (f"  ex: {entry.get('sample')}" if rwc else ""))
     except Exception as e:
         sources.append({"name": "Coupe du monde de rugby", "sport": "Rugby", "ok": False, "error": str(e)})
         print(f"[!!] Coupe du monde de rugby: {e}", file=sys.stderr)
@@ -1005,6 +1025,28 @@ def main():
             print(f"[ok] Horaires complétés par RugbyPass : {comble}/{sans_heure}")
         except Exception as e:
             print(f"[!!] Complément RugbyPass: {e}", file=sys.stderr)
+
+    # Récapitulatif : un 0 est ambigu (dormant ? parseur en échec ?), et un
+    # manque d'horaires passe inaperçu. Ces lignes le rendent visible.
+    from collections import Counter as _Cnt
+    _tot, _avec_h = _Cnt(), _Cnt()
+    for _m in matches:
+        _c = _m.get("competition")
+        _tot[_c] += 1
+        if _m.get("start"):
+            _avec_h[_c] += 1
+    print("")
+    print("--- récapitulatif ---")
+    for _s in sources:
+        _c = _s.get("name")
+        _n, _h = _tot.get(_c, 0), _avec_h.get(_c, 0)
+        if _n == 0:
+            print(f"  {_c:26s} 0 match          <- dormant, ou source à vérifier")
+        elif _h < _n:
+            print(f"  {_c:26s} {_n:4d} matchs, {_n - _h} sans horaire")
+        else:
+            print(f"  {_c:26s} {_n:4d} matchs, horaires complets")
+    print("")
 
     seen, uniq = set(), []
     for m in matches:
