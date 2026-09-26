@@ -11,7 +11,7 @@ Chaque exécution se termine par :
 
 ```
 --- récapitulatif ---
-  Top 14                      185 matchs, horaires complets
+  Tournoi des VI Nations       15 matchs, horaires complets
   Coupe du monde de rugby       0 match          <- dormant, ou source à vérifier
   Champions Cup                48 matchs, 12 sans horaire
 ```
@@ -69,8 +69,8 @@ L'appariement se fait sur **date ± 1 jour + paire d'équipes** — la toléranc
 d'un jour est indispensable : un match en Nouvelle-Zélande change de date
 une fois converti en UTC.
 
-### LNR — n'est plus utilisée
-Le Top 14 et la Pro D2 ont été retirés volontairement. Le code
+### LNR — n'est plus utilisée (retrait volontaire, septembre 2026)
+Le Top 14 et la Pro D2 **ne figurent plus dans l'appli**. Le code
 (`collect_lnr`, `collect_top14`, `collect_prod2`) reste dans le fichier mais
 n'est plus appelé. La LNR ne gère **que** ces deux championnats : elle n'a
 jamais été une source pour les coupes d'Europe (EPCR) ni l'international.
@@ -93,6 +93,13 @@ jamais été une source pour les coupes d'Europe (EPCR) ni l'international.
   icône, supprimer et recréer le raccourci.
 
 ---
+
+- **Lignes de tableau qui évoluent en cours de compétition** : dans la WXV,
+  Wikipédia ajoute au fil des journées des notes (`{{efn|...}}` pour un report
+  météo), les scores, ou la mention *Cancelled*. Une expression régulière
+  monolithique échouait alors sur toute la journée. Les lignes sont désormais
+  découpées en cellules sur `||`, ce qui tolère ces ajouts — et permet au
+  passage de récupérer les scores et d'écarter les matchs annulés.
 
 ## 5. En attente (rien à faire, se remplira seul)
 
