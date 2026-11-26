@@ -414,6 +414,9 @@ def collect_nations_championship(year=2026):
             if not m.get("home") or not m.get("away"):
                 continue
             start_utc = combine_date_time_paris(m["date"], m["time_local"]) if m["time_local"] else None
+            for cote in ("home", "away"):
+                if m[cote] == "Galles":
+                    m[cote] = "Pays de Galles"
             out.append({
                 "id": slug("nations-championship", year, "finale", m["date"], m["home"], m["away"]),
                 "sport": "Rugby", "competition": "Championnat des nations",
@@ -820,6 +823,8 @@ _ALIAS = {}
 for _en, _fr in RP_VERS_FR.items():
     _ALIAS[_en.casefold()] = _fr.casefold()
     _ALIAS[_fr.casefold()] = _fr.casefold()
+# forme courte parfois écrite par Wikipédia (week-end final 2026 : « Galles »)
+_ALIAS["galles"] = "pays de galles"
 
 def _norm_equipe(nom):
     """'New Zealand Women' et 'Nouvelle-Zélande' -> même clé d'appariement."""
@@ -845,12 +850,35 @@ def index_rugbypass(uris):
         time.sleep(0.5)
     return idx
 
+def _dater_sans_date(m, idx, matches):
+    """Match connu sans date (ex. week-end final : Wikipédia a l'affiche mais
+    pas le jour). On prend chez RugbyPass la rencontre la plus tardive de la
+    même paire, à un autre jour que celles déjà présentes chez nous (une même
+    paire peut se rencontrer en poule puis en finale)."""
+    paire = frozenset({_norm_equipe(m.get("home")), _norm_equipe(m.get("away"))})
+    deja = {x.get("date") for x in matches
+            if x is not m and x.get("date") and x.get("competition") == m.get("competition")
+            and frozenset({_norm_equipe(x.get("home")), _norm_equipe(x.get("away"))}) == paire}
+    candidats = [ep for (jour, p), ep in idx.items() if p == paire and jour not in deja]
+    if not candidats:
+        return False
+    dt = datetime.fromtimestamp(max(candidats), tz=timezone.utc)
+    m["start"] = iso_z(dt)
+    m["date"] = dt.strftime("%Y-%m-%d")
+    m["tbd"] = False
+    return True
+
 def completer_horaires(matches, idx):
     """Ajoute l'heure aux matchs qui n'ont qu'une date. Tolérance ±1 jour
-    (un match en Nouvelle-Zélande peut basculer de date une fois en UTC)."""
+    (un match en Nouvelle-Zélande peut basculer de date une fois en UTC).
+    Les matchs sans date du tout sont datés par _dater_sans_date."""
     n = 0
     for m in matches:
-        if m.get("start") or not m.get("date") or m.get("sport") != "Rugby":
+        if m.get("start") or m.get("sport") != "Rugby":
+            continue
+        if not m.get("date"):
+            if m.get("home") and m.get("away") and _dater_sans_date(m, idx, matches):
+                n += 1
             continue
         paire = frozenset({_norm_equipe(m.get("home")), _norm_equipe(m.get("away"))})
         base = datetime.strptime(m["date"], "%Y-%m-%d")
@@ -1042,8 +1070,10 @@ def main():
 
     # Complément horaire : pour les matchs datés sans heure (Wikipédia ne donne
     # souvent que la date), on va chercher l'horaire exact chez RugbyPass.
+    # (les matchs sans date du tout — week-end final — comptent aussi)
     sans_heure = sum(1 for m in matches
-                     if m.get("sport") == "Rugby" and m.get("date") and not m.get("start"))
+                     if m.get("sport") == "Rugby" and not m.get("start")
+                     and (m.get("date") or (m.get("home") and m.get("away"))))
     if sans_heure:
         try:
             idx = index_rugbypass(RP_COMPLEMENT)
